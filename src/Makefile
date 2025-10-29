@@ -1,63 +1,62 @@
-C++ = g++
+# =====================================================
+# UDR Core Makefile — uses external ../../udt build
+# =====================================================
 
-ifndef os
-   os = LINUX
+CXX      = g++
+OS      ?= LINUX
+ARCH    ?= AMD64
+
+# --- compiler flags ----------------------------------------------------------
+CXXFLAGS = -Wall -D$(OS) -finline-functions -g -I../../udt/src
+ifeq ($(ARCH),IA32)
+	CXXFLAGS += -DIA32
+endif
+ifeq ($(ARCH),IA64)
+	CXXFLAGS += -DIA64
+endif
+ifeq ($(ARCH),POWERPC)
+	CXXFLAGS += -mcpu=powerpc
+endif
+ifeq ($(ARCH),SPARC)
+	CXXFLAGS += -DSPARC
+endif
+ifeq ($(OS),OSX)
+	CXXFLAGS += -I/usr/local/opt/openssl/include
 endif
 
-ifndef arch
-   arch = AMD64
+# --- linker flags ------------------------------------------------------------
+UDT_LIB  = ../../udt/dist/libudt-2.3.2.a
+LDFLAGS  = -L../../udt/dist $(UDT_LIB) -lstdc++ -lpthread -lm -lssl -lcrypto
+ifeq ($(OS),UNIX)
+	LDFLAGS += -lsocket
+endif
+ifeq ($(OS),OSX)
+	LDFLAGS += -L/usr/local/opt/openssl/lib
+endif
+ifeq ($(OS),SUNOS)
+	LDFLAGS += -lrt -lsocket
 endif
 
-CCFLAGS = -Wall -D$(os) -I../udt/src -finline-functions -g
+# --- objects / targets -------------------------------------------------------
+OBJS = udr.o udr_threads.o udr_util.o udr_options.o
+APP  = udr
 
-ifeq ($(arch), IA32)
-   CCFLAGS += -DIA32 #-mcpu=pentiumpro -march=pentiumpro -mmmx -msse
-endif
+# --- rules -------------------------------------------------------------------
+all: version $(APP)
+	@echo "[done] UDR built → $(APP)"
 
-ifeq ($(arch), POWERPC)
-   CCFLAGS += -mcpu=powerpc
-endif
-
-ifeq ($(arch), IA64)
-   CCFLAGS += -DIA64
-endif
-
-ifeq ($(arch), SPARC)
-   CCFLAGS += -DSPARC
-endif
-
-LDFLAGS = -L../src ../udt/src/libudt.a -lstdc++ -lpthread -lm -lssl -lcrypto
-
-ifeq ($(os), UNIX)
-   LDFLAGS += -lsocket
-endif
-
-ifeq ($(os), OSX)
-   LDFLAGS += -I/usr/local/opt/openssl/include -L/usr/local/opt/openssl/lib
-   CCFLAGS += -I/usr/local/opt/openssl/include
-endif
-
-ifeq ($(os), SUNOS)
-   LDFLAGS += -lrt -lsocket
-endif
-
-DIR = $(shell pwd)
-
-APP = version.h udr
-
-all: $(APP)
-
-version.h:
-	./version.sh
+version:
+	@./version.sh
 
 %.o: %.cpp
-	$(C++) $(CCFLAGS) $< -c
+	$(CXX) $(CXXFLAGS) -c $<
 
-udr: udr.o udr_threads.o udr_util.o udr_options.o
-	$(C++) $^ -o $@ $(LDFLAGS)
+$(APP): $(OBJS)
+	@if [ ! -f "$(UDT_LIB)" ]; then \
+		echo "[error] missing external UDT library: $(UDT_LIB)"; \
+		exit 2; \
+	fi
+	$(CXX) $(CXXFLAGS) -o $@ $(OBJS) $(LDFLAGS)
 
 clean:
-	rm -f *.o $(APP)
-
-install:
-	export PATH=$(DIR):$$PATH
+	rm -f *.o $(APP) version.h
