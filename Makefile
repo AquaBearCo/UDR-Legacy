@@ -1,161 +1,115 @@
-# =====================================================
-# UDR Master Makefile (root-anchored, quiet by default)
-# =====================================================
-#   - root_dir uses abspath for reliability
-#   - Separate dist trees: UDT and UDR
-#   - Auto-generates version.h
-#   - Static/shared linking auto-detect
-#   - Quiet by default; full logs with DEBUG=1
-# =====================================================
+#######################################################
+# UDR Master Makefile
+#  - Builds from inside src/udr
+#  - Stages binaries in dist/bin and libs in dist/lib
+#  - Prefers static libudt when available
+#######################################################
 
-# ------------------------------
-# 10. Path definitions
-# ------------------------------
-root_dir   := $(abspath $(CURDIR)/../..)   # e.g., /home/ubuntu/undercurrent
-src_dir    := $(root_dir)/src
-udt_root   := $(src_dir)/udt
-udr_root   := $(src_dir)/udr
-
-dist_udt   := $(udt_root)/dist              # built libudt*.{a,so}
-dist_udr   := $(udr_root)/dist              # built udr + staged libs
-bin_dir    := $(dist_udr)/bin
-lib_dir    := $(dist_udr)/lib
-src_udr    := $(udr_root)/src
-version_h  := $(src_udr)/version.h
-
-app_udr    := udr
-
-# ------------------------------
-# 20. Build configuration
-# ------------------------------
 CXX        = g++
 OS         ?= LINUX
 ARCH       ?= AMD64
-DEBUG      ?= 0      # 0 = quiet, 1 = verbose build output
+SRC_DIR    = src
+DIST_DIR   = dist
+BIN_DIR    = $(DIST_DIR)/bin
+LIB_DIR    = $(DIST_DIR)/lib
+UDT_DIR    = ../udt/dist
+APP        = udr
+VERSION_H  = $(SRC_DIR)/version.h
 
-INC_PATHS  := $(shell find $(src_udr) -type d 2>/dev/null)
-CXXFLAGS   := -Wall -D$(OS) -finline-functions -g -I$(udt_root)/src $(addprefix -I,$(INC_PATHS))
+SRCS       = $(wildcard $(SRC_DIR)/*.cpp)
+OBJS       = $(patsubst $(SRC_DIR)/%.cpp,$(SRC_DIR)/%.o,$(SRCS))
 
-LDFLAGS_STATIC := -ludt -lssl -lcrypto -lz -lpthread -lm -static-libstdc++
-LDFLAGS_SHARED := -ludt -lssl -lcrypto -lz -lpthread -lm -lstdc++ -Wl,-rpath,'$$ORIGIN/../lib'
+# Compiler flags include every subdirectory under src for headers
+INC_PATHS := $(shell find $(SRC_DIR) -type d 2>/dev/null)
+CXXFLAGS  = -Wall -D$(OS) -finline-functions -g -I../udt/src $(addprefix -I,$(INC_PATHS))
 
-# ------------------------------
-# 30. Sources
-# ------------------------------
-SRCS := $(wildcard $(src_udr)/*.cpp)
-OBJS := $(SRCS:.cpp=.o)
+.PHONY: all clean install prepare help
 
-.PHONY: all clean install prepare help print-vars
-
-# =====================================================
-# 40. Version header generator
-# =====================================================
-$(version_h):
+#######################################################
+# 10. Generate version header
+#######################################################
+$(VERSION_H):
 	@echo "[gen] creating version.h"
-	@mkdir -p $(src_udr)
-	@printf '#pragma once\n#define UDR_VERSION "5.x-dev-%s"\nstatic const char* version = UDR_VERSION;\n' "$$(date +%Y%m%d)" > $(version_h)
+	@mkdir -p $(SRC_DIR)
+	@printf '#pragma once\n#define UDR_VERSION "5.x-dev-%s"\nstatic const char* version = UDR_VERSION;\n' "$$(date +%Y%m%d)" > $(VERSION_H)
 
-# =====================================================
-# 50. Build targets
-# =====================================================
-all: prepare $(bin_dir)/$(app_udr)
+#######################################################
+# 20. Build targets
+#######################################################
+all: prepare $(BIN_DIR)/$(APP)
 
 clean:
 	@echo "[clean] removing previous UDR build outputs"
-	@rm -rf $(OBJS) $(dist_udr) $(src_udr)/version.h $(app_udr) >/dev/null 2>&1 || true
+	@rm -rf $(OBJS) $(DIST_DIR) $(SRC_DIR)/version.h $(APP)
 	@echo "[clean] done."
 
-# =====================================================
-# 60. Prepare - locate and stage UDT libs
-# =====================================================
+#######################################################
+# 30. Prepare - stage UDT artifacts
+#######################################################
 prepare:
 	@echo "[prepare] staging UDT artifacts"
-	@mkdir -p $(bin_dir) $(lib_dir)
-	@udt_sources=$$(find $(dist_udt) -maxdepth 1 -type f \( -name "libudt*.so" -o -name "libudt*.a" \) | sort); \
+	@mkdir -p $(BIN_DIR) $(LIB_DIR)
+	@udt_sources=$$(find $(UDT_DIR) -maxdepth 1 -type f \( -name "libudt*.so" -o -name "libudt*.a" \) | sort); \
 	if [ -n "$$udt_sources" ]; then \
 		for f in $$udt_sources; do \
 			base=$$(basename "$$f"); \
-			cp -f "$$f" $(lib_dir)/"$$base"; \
+			cp -f "$$f" $(LIB_DIR)/"$$base"; \
 			case "$$base" in \
-				libudt*.so) cp -f "$$f" $(lib_dir)/libudt.so ;; \
-				libudt*.a)  cp -f "$$f" $(lib_dir)/libudt.a ;; \
+				libudt*.so) cp -f "$$f" $(LIB_DIR)/libudt.so ;; \
+				libudt*.a)  cp -f "$$f" $(LIB_DIR)/libudt.a ;; \
 			esac; \
 		done; \
 		echo "[prepare] staged: $$udt_sources"; \
 	else \
-		echo "[error] no libudt found in $(dist_udt)" >&2; \
-		echo "[hint] build UDT first: cd $(udt_root) && make -f make_linux.mak"; \
+		echo "[error] no libudt found in $(UDT_DIR)" >&2; \
+		echo "[hint] build UDT first: cd ../udt && make -f make_linux.mak"; \
 		exit 2; \
 	fi
 
-# =====================================================
-# 70. Compile (quiet/verbose controlled by DEBUG)
-# =====================================================
-$(src_udr)/%.o: $(src_udr)/%.cpp $(version_h)
+#######################################################
+# 40. Compile objects
+#######################################################
+$(SRC_DIR)/%.o: $(SRC_DIR)/%.cpp $(VERSION_H)
 	@echo "[cc] compiling $<"
-ifeq ($(DEBUG),1)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
-else
-	@$(CXX) $(CXXFLAGS) -c $< -o $@ 2>/dev/null
-endif
 
-# =====================================================
-# 80. Link (auto static/shared)
-# =====================================================
-$(bin_dir)/$(app_udr): $(OBJS)
-	@echo "[link] building $(app_udr)"
-	@if [ -f $(lib_dir)/libudt.a ]; then \
-		echo "[link] using static libudt.a"; \
-		if [ "$(DEBUG)" = "1" ]; then \
-			$(CXX) $(OBJS) -o $(bin_dir)/$(app_udr) \
-				-L$(lib_dir) -L$(dist_udt) $(LDFLAGS_STATIC); \
-		else \
-			@$(CXX) $(OBJS) -o $(bin_dir)/$(app_udr) \
-				-L$(lib_dir) -L$(dist_udt) $(LDFLAGS_STATIC) 2>/dev/null; \
-		fi; \
-	elif [ -f $(lib_dir)/libudt.so ]; then \
-		echo "[link] using shared libudt.so"; \
-		if [ "$(DEBUG)" = "1" ]; then \
-			$(CXX) $(OBJS) -o $(bin_dir)/$(app_udr) \
-				-L$(lib_dir) -L$(dist_udt) $(LDFLAGS_SHARED); \
-		else \
-			@$(CXX) $(OBJS) -o $(bin_dir)/$(app_udr) \
-				-L$(lib_dir) -L$(dist_udt) $(LDFLAGS_SHARED) 2>/dev/null; \
-		fi; \
+#######################################################
+# 50. Link: static preferred, shared fallback
+#######################################################
+$(BIN_DIR)/$(APP): $(OBJS)
+	@echo "[link] building $(APP)"
+	@if [ -f $(LIB_DIR)/libudt-2.3.2.a ]; then \
+		echo "[link] using static libudt-2.3.2.a"; \
+		$(CXX) $(OBJS) -o $(BIN_DIR)/$(APP) \
+			-L$(LIB_DIR) -L$(UDT_DIR) -ludt \
+			-lssl -lcrypto -lz -lpthread -lm -static-libstdc++; \
+	elif [ -f $(LIB_DIR)/libudt-2.3.2.so ]; then \
+		echo "[link] using shared libudt-2.3.2.so"; \
+		$(CXX) $(OBJS) -o $(BIN_DIR)/$(APP) \
+			-L$(LIB_DIR) -L$(UDT_DIR) -ludt \
+			-Wl,-rpath,'$$ORIGIN/../lib' \
+			-lssl -lcrypto -lz -lpthread -lm -lstdc++; \
 	else \
-		echo "[error] no libudt found in $(lib_dir)" >&2; \
+		echo "[error] no libudt found under $(LIB_DIR)" >&2; \
 		exit 3; \
 	fi
-	@echo "[done] built $(bin_dir)/$(app_udr)"
+	@echo "[done] built $(BIN_DIR)/$(APP)"
 
-# =====================================================
-# 90. Install
-# =====================================================
+#######################################################
+# 60. Install helper
+#######################################################
 install: all
 	@echo "[install] staging artifacts"
-	@if [ -f $(lib_dir)/libudt.a ]; then echo "[pack] static libudt.a staged"; fi
-	@if [ -f $(lib_dir)/libudt.so ]; then echo "[pack] shared libudt.so staged"; fi
-	@echo "[done] build artifacts available under $(dist_udr)/"
+	@if [ -f $(LIB_DIR)/libudt.a ]; then echo "[pack] static libudt.a staged"; fi
+	@if [ -f $(LIB_DIR)/libudt.so ]; then echo "[pack] shared libudt.so staged"; fi
+	@echo "[done] build artifacts available under $(DIST_DIR)/"
 
-# =====================================================
-# 100. Utilities
-# =====================================================
-print-vars:
-	@echo "root_dir   = $(root_dir)"
-	@echo "src_dir    = $(src_dir)"
-	@echo "udt_root   = $(udt_root)"
-	@echo "udr_root   = $(udr_root)"
-	@echo "dist_udt   = $(dist_udt)"
-	@echo "dist_udr   = $(dist_udr)"
-	@echo "bin_dir    = $(bin_dir)"
-	@echo "lib_dir    = $(lib_dir)"
-	@echo "app_udr    = $(app_udr)"
-	@echo "DEBUG      = $(DEBUG)"
-
+#######################################################
+# 70. Help
+#######################################################
 help:
 	@echo "Targets:"
-	@echo "  make all         - Build UDR quietly (prepare + compile)"
-	@echo "  make DEBUG=1     - Build with full warnings/logs"
-	@echo "  make clean       - Remove outputs"
-	@echo "  make install     - Copy binaries/libs to dist/"
-	@echo "  make print-vars  - Show resolved paths"
+	@echo "  make all       - Full build (prepare + compile)"
+	@echo "  make clean     - Remove outputs"
+	@echo "  make install   - Copy binaries/libs to dist/"
+	@echo "  make help      - Show this message"
