@@ -19,11 +19,15 @@ VERSION_H  = $(SRC_DIR)/version.h
 SRCS       = $(wildcard $(SRC_DIR)/*.cpp)
 OBJS       = $(SRCS:.cpp=.o)
 # =====================================================
-# Compiler and linker flags (auto include discovery)
+# 02. Compiler and linker flags (auto include discovery)
 # =====================================================
 INC_PATHS := $(shell find $(SRC_DIR) -type d 2>/dev/null)
-CCFLAGS    = -Wall -D$(OS) -finline-functions -g -I../udt/src $(addprefix -I,$(INC_PATHS))
-LDFLAGS    = -lstdc++ -lpthread -lm -lssl -lcrypto
+CCFLAGS   = -Wall -D$(OS) -finline-functions -g -I../udt/src $(addprefix -I,$(INC_PATHS))
+
+# Include both security libs and proper runtime rpath resolution
+LDFLAGS   = -Wl,-rpath,'$$ORIGIN/../udt/dist' \
+             -L$(DIST_DIR) -L../udt/dist \
+             -ludt -lssl -lcrypto -lz -lpthread -lm -lstdc++
 
 
 
