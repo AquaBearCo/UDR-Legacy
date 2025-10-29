@@ -7,6 +7,10 @@
 # =====================================================
 
 TARGETS = all clean install
+APP = version.h udr
+version.h:
+	@echo "[gen] creating version.h"
+	@echo '#define UDR_VERSION "5.x-dev-$(shell date +%Y%m%d)"' > version.h
 
 # =====================================================
 # 10. Default build target
