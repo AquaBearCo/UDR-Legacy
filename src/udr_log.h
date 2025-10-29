@@ -1,8 +1,9 @@
 // =====================================================
-// udr_log.h — UDR Logging Interface
+// udr_log.h - UDR Logging Interface
 // =====================================================
 // Provides lightweight logging macros and helpers for
-// debug, info, warning, and error output.
+// debug, info, warning, and error output. Uses a
+// UDR_ prefix to avoid clashing with <syslog.h>.
 // =====================================================
 
 #ifndef UDR_LOG_H
@@ -16,10 +17,10 @@
 // 10. Log levels
 // =====================================================
 enum UDRLogLevel {
-    LOG_DEBUG = 0,
-    LOG_INFO,
-    LOG_WARN,
-    LOG_ERROR
+    UDR_LOG_DEBUG = 0,
+    UDR_LOG_INFO,
+    UDR_LOG_WARN,
+    UDR_LOG_ERROR
 };
 
 // =====================================================
@@ -36,10 +37,10 @@ inline void udr_log(UDRLogLevel level, const char* fmt, ...) {
 
     const char* prefix;
     switch (level) {
-        case LOG_DEBUG: prefix = "[debug]"; break;
-        case LOG_INFO:  prefix = "[info] "; break;
-        case LOG_WARN:  prefix = "[warn] "; break;
-        case LOG_ERROR: prefix = "[error]"; break;
+        case UDR_LOG_DEBUG: prefix = "[debug]"; break;
+        case UDR_LOG_INFO:  prefix = "[info] "; break;
+        case UDR_LOG_WARN:  prefix = "[warn] "; break;
+        case UDR_LOG_ERROR: prefix = "[error]"; break;
         default:        prefix = "[log]  "; break;
     }
 
@@ -60,9 +61,9 @@ inline void udr_log(UDRLogLevel level, const char* fmt, ...) {
 // =====================================================
 // 40. Convenience macros
 // =====================================================
-#define LOGD(...) udr_log(LOG_DEBUG, __VA_ARGS__)
-#define LOGI(...) udr_log(LOG_INFO,  __VA_ARGS__)
-#define LOGW(...) udr_log(LOG_WARN,  __VA_ARGS__)
-#define LOGE(...) udr_log(LOG_ERROR, __VA_ARGS__)
+#define LOGD(...) udr_log(UDR_LOG_DEBUG, __VA_ARGS__)
+#define LOGI(...) udr_log(UDR_LOG_INFO,  __VA_ARGS__)
+#define LOGW(...) udr_log(UDR_LOG_WARN,  __VA_ARGS__)
+#define LOGE(...) udr_log(UDR_LOG_ERROR, __VA_ARGS__)
 
 #endif // UDR_LOG_H
