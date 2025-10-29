@@ -22,12 +22,12 @@ OBJS       = $(SRCS:.cpp=.o)
 # 02. Compiler and linker flags (auto include discovery)
 # =====================================================
 INC_PATHS := $(shell find $(SRC_DIR) -type d 2>/dev/null)
-CCFLAGS   = -Wall -D$(OS) -finline-functions -g -I../udt/src $(addprefix -I,$(INC_PATHS))
+CXXFLAGS  = -Wall -D$(OS) -finline-functions -g -I../udt/src $(addprefix -I,$(INC_PATHS))
 
-# Include both security libs and proper runtime rpath resolution
-LDFLAGS   = -Wl,-rpath,'$$ORIGIN/../udt/dist' \
-             -L$(DIST_DIR) -L../udt/dist \
-             -ludt -lssl -lcrypto -lz -lpthread -lm -lstdc++
+# Shared/static lib discovery and runtime search path
+LDFLAGS   = -Wl,-rpath,'$$ORIGIN' -Wl,-rpath,'$$ORIGIN/../udt/dist' \
+             -L$(DIST_DIR) -L../udt/dist
+LDLIBS    = -ludt -lssl -lcrypto -lz -lpthread -lm
 
 
 
@@ -57,10 +57,17 @@ clean:
 prepare:
         @echo "[prepare] locating external UDT library"
         @mkdir -p $(DIST_DIR)
-        @udt_file=$$(find $(UDT_DIR) -maxdepth 1 -type f -name "libudt*.[as][ao]" | head -n 1); \
-        if [ -n "$$udt_file" ]; then \
-                cp -f "$$udt_file" $(DIST_DIR)/; \
-                echo "[link] using external UDT library: $$(basename $$udt_file)"; \
+        @udt_files=$$(find $(UDT_DIR) -maxdepth 1 -type f \( -name "libudt*.so" -o -name "libudt*.a" \) | sort); \
+        if [ -n "$$udt_files" ]; then \
+                for f in $$udt_files; do \
+                        base=$$(basename "$$f"); \
+                        cp -f "$$f" $(DIST_DIR)/"$$base"; \
+                        case "$$base" in \
+                                libudt*.so) ln -sf "$$base" $(DIST_DIR)/libudt.so ;; \
+                                libudt*.a)  ln -sf "$$base" $(DIST_DIR)/libudt.a ;; \
+                        esac; \
+                done; \
+                echo "[link] using external UDT library: $$udt_files"; \
         else \
                 echo "[error] no libudt found in $(UDT_DIR)" >&2; \
                 echo "[hint] build UDT first: cd ../udt && make -f make_linux.mak"; \
@@ -75,19 +82,17 @@ prepare:
 # =====================================================
 $(SRC_DIR)/%.o: $(SRC_DIR)/%.cpp $(VERSION_H)
         @echo "[cc] compiling $<"
-        $(CXX) $(CCFLAGS) -c $< -o $@
+        $(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(DIST_DIR)/$(APP): $(OBJS)
         @echo "[link] building $(APP)"
         @mkdir -p $(DIST_DIR)
-        @LIBFILE=$$(find $(DIST_DIR) -maxdepth 1 -type f \( -name "libudt*.a" -o -name "libudt*.so" \) | head -n 1); \
-        if [ -z "$$LIBFILE" ]; then \
+        @if [ ! -f $(DIST_DIR)/libudt.so ] && [ ! -f $(DIST_DIR)/libudt.a ]; then \
                 echo "[error] no UDT library found in $(DIST_DIR)" >&2; \
                 exit 3; \
-        else \
-                echo "[link] using $$LIBFILE"; \
-                $(CXX) $(OBJS) -o $(DIST_DIR)/$(APP) -L$(DIST_DIR) -lstdc++ -lpthread -lm -lssl -lcrypto $$LIBFILE; \
         fi
+        @echo "[link] using $$(ls $(DIST_DIR)/libudt.* 2>/dev/null | tr '\n' ' ')"
+        $(CXX) $(OBJS) -o $(DIST_DIR)/$(APP) $(LDFLAGS) $(LDLIBS)
         @echo "[done] built $(DIST_DIR)/$(APP)"
 
 
