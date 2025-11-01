@@ -1,7 +1,17 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
-import sys, os, time, atexit
+"""Lightweight helpers for running the UDR server as a daemon."""
+
+from __future__ import annotations
+
+import atexit
+import os
+import sys
+import time
+from pathlib import Path
 from signal import SIGTERM
+from typing import Optional
+
 
 class Daemon:
     """
@@ -9,7 +19,13 @@ class Daemon:
    
     Usage: subclass the Daemon class and override the run() method
     """
-    def __init__(self, pidfile, stdin='/dev/null', stdout='/dev/null', stderr='/dev/null'):
+    def __init__(
+        self,
+        pidfile: str,
+        stdin: str = "/dev/null",
+        stdout: str = "/dev/null",
+        stderr: str = "/dev/null",
+    ) -> None:
         self.stdin = stdin
         self.stdout = stdout
         self.stderr = stderr
@@ -22,13 +38,13 @@ class Daemon:
         http://www.erlenstar.demon.co.uk/unix/faq_2.html#SEC16
         """
         try:
-                pid = os.fork()
-                if pid > 0:
-                        # exit first parent
-                        sys.exit(0)
-        except OSError, e:
-                sys.stderr.write("[FAIL] fork #1: %d (%s)\n" % (e.errno, e.strerror))
-                sys.exit(1)
+            pid = os.fork()
+            if pid > 0:
+                # exit first parent
+                sys.exit(0)
+        except OSError as exc:
+            sys.stderr.write(f"[FAIL] fork #1: {exc.errno} ({exc.strerror})\n")
+            sys.exit(1)
 
         # decouple from parent environment
         os.chdir("/")
@@ -37,43 +53,47 @@ class Daemon:
 
         # do second fork
         try:
-                pid = os.fork()
-                if pid > 0:
-                        # exit from second parent
-                        sys.exit(0)
-        except OSError, e:
-                sys.stderr.write("[FAIL] fork #2: %d (%s)\n" % (e.errno, e.strerror))
-                sys.exit(1)
+            pid = os.fork()
+            if pid > 0:
+                # exit from second parent
+                sys.exit(0)
+        except OSError as exc:
+            sys.stderr.write(f"[FAIL] fork #2: {exc.errno} ({exc.strerror})\n")
+            sys.exit(1)
 
         # write pidfile
         pid = str(os.getpid())
-        file(self.pidfile,'w+').write("%s\n" % pid)
+        Path(self.pidfile).write_text(f"{pid}\n", encoding="utf-8")
 
         atexit.register(self.delpid)
           
         # redirect standard file descriptors
         sys.stdout.flush()
         sys.stderr.flush()
-        si = file(self.stdin, 'r')
-        so = file(self.stdout, 'a+')
-        se = file(self.stderr, 'a+', 0)
-        os.dup2(si.fileno(), sys.stdin.fileno())
-        os.dup2(so.fileno(), sys.stdout.fileno())
-        os.dup2(se.fileno(), sys.stderr.fileno())
-   
+        with open(self.stdin, "r", encoding="utf-8", errors="ignore") as si, open(
+            self.stdout, "a+", encoding="utf-8", errors="ignore"
+        ) as so, open(self.stderr, "a+", encoding="utf-8", errors="ignore"
+        ) as se:
+            os.dup2(si.fileno(), sys.stdin.fileno())
+            os.dup2(so.fileno(), sys.stdout.fileno())
+            os.dup2(se.fileno(), sys.stderr.fileno())
+
     def delpid(self):
-        os.remove(self.pidfile)
+        try:
+            os.remove(self.pidfile)
+        except FileNotFoundError:
+            pass
 
     def start(self):
         """
         Start the daemon
         """
         # Check for a pidfile to see if the daemon already runs
+        pid: Optional[int]
         try:
-            pf = file(self.pidfile,'r')
-            pid = int(pf.read().strip())
-            pf.close()
-        except IOError:
+            with open(self.pidfile, "r", encoding="utf-8") as pf:
+                pid = int(pf.read().strip())
+        except (IOError, ValueError):
             pid = None
 
         if pid:
@@ -91,10 +111,9 @@ class Daemon:
         """
         # Get the pid from the pidfile
         try:
-            pf = file(self.pidfile,'r')
-            pid = int(pf.read().strip())
-            pf.close()
-        except IOError:
+            with open(self.pidfile, "r", encoding="utf-8") as pf:
+                pid = int(pf.read().strip())
+        except (IOError, ValueError):
             pid = None
 
         if not pid:
@@ -104,16 +123,18 @@ class Daemon:
 
         # Try killing the daemon process       
         try:
-            while 1:
+            while True:
                 os.kill(pid, SIGTERM)
                 time.sleep(0.1)
-        except OSError, err:
-            err = str(err)
-            if err.find("No such process") > 0:
-                if os.path.exists(self.pidfile):
+        except OSError as err:
+            message = str(err)
+            if "No such process" in message:
+                try:
                     os.remove(self.pidfile)
+                except FileNotFoundError:
+                    pass
             else:
-                sys.stderr.write("[FAIL]\n%s\n" % str(err))
+                sys.stderr.write(f"[FAIL]\n{message}\n")
                 sys.exit(1)
 
     #def restart(self):

@@ -1,6 +1,8 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
-#   Copyright 2012 Laboratory for Advanced Computing at the University of Chicago
+"""Entry point for the Python-based UDR server."""
+
+# Copyright 2012 Laboratory for Advanced Computing at the University of Chicago
 #
 #   This file is part of UDR.
 # 
@@ -16,28 +18,45 @@
 #   License for the specific language governing permissions and limitations 
 #   under the License.
 
-import os, re, sys, pwd, grp, time
-import signal, optparse, subprocess, logging
-import SocketServer
+from __future__ import annotations
+
+import argparse
+import logging
+import os
+import pwd
+import grp
+import re
+import signal
+import subprocess
+import sys
+import time
+from pathlib import Path
+from typing import Iterable
+
+import socketserver
+
 from daemon import Daemon
 
-class UDRHandler(SocketServer.StreamRequestHandler):
+class UDRHandler(socketserver.StreamRequestHandler):
     """
     Handler for incoming UDR connections, ignores the UDR command sent and builds it's own
     UDR command to run on the server based on the server's configuration.
     """
-    def handle(self):
-        logging.info('New connection from %s' % self.client_address[0])
+    def handle(self) -> None:
+        logging.info("New connection from %s", self.client_address[0])
 
         #depends on the udr cmd having a newline at the end
-        #perhaps should add a timeout, or maybe none at all 
-        line = self.rfile.readline().strip()
+        #perhaps should add a timeout, or maybe none at all
+        line = self.rfile.readline()
+        line = line.strip()
 
 # hllo
         # print self.server.params
 
         if not line:
-            logging.warning('Connection problem, did not receive udr command from client')
+            logging.warning(
+                "Connection problem, did not receive udr command from client"
+            )
         else:
             udr_cmd = []
             udr_cmd.append(self.server.params['udr'])
@@ -72,18 +91,29 @@ class UDRHandler(SocketServer.StreamRequestHandler):
             udr_cmd.append('-t')
             udr_cmd.append('rsync')
 
-            logging.debug('UDR cmd: %s' % udr_cmd)
+            logging.debug('UDR cmd: %s', udr_cmd)
 
             try:
-                signal.signal(signal.SIGCHLD,signal.SIG_IGN)
-                udr_proc = subprocess.Popen(udr_cmd, stdout=subprocess.PIPE, stdin=subprocess.PIPE)
+                signal.signal(signal.SIGCHLD, signal.SIG_IGN)
+                udr_proc = subprocess.Popen(
+                    udr_cmd,
+                    stdout=subprocess.PIPE,
+                    stdin=subprocess.PIPE,
+                    text=True,
+                )
                 firstline = udr_proc.stdout.readline()
-                logging.debug('firstline: ' + firstline)
-                logging.info('providing port %s for UDR to %s' % (firstline.split()[0], self.client_address[0]))
-                self.wfile.write(firstline)
+                logging.debug('firstline: %s', firstline)
+                port = firstline.split()[0] if firstline else 'unknown'
+                logging.info(
+                    'providing port %s for UDR to %s',
+                    port,
+                    self.client_address[0],
+                )
+                self.wfile.write(firstline.encode("utf-8"))
+                self.wfile.flush()
 
-            except OSError, err:
-                logging.critical('%s, cmd: %s, exiting.' % (' '.join(udr_cmd), err.strerror))
+            except OSError as err:
+                logging.critical('%s, cmd: %s, exiting.', ' '.join(udr_cmd), err)
                 sys.exit(1)
 
 class UDRServer(Daemon, object):
@@ -92,7 +122,7 @@ class UDRServer(Daemon, object):
     when appropriate
     """
     def __init__(self, configfile, verbose=False):
-        self.params = {}
+        self.params: dict[str, str] = {}
         self.params['verbose'] = verbose
         self.params['udr'] = 'udr'
         self.params['start port'] = '9000'
@@ -101,24 +131,24 @@ class UDRServer(Daemon, object):
         self.params['server port'] = 9000
         self.params['rsyncd conf'] = '/etc/rsyncd.conf'
         self.params['pid file'] = '/var/run/udrd.pid'
-        self.params['log file'] = ''.join([os.getcwd(), '/udr.log'])
+        self.params['log file'] = str(Path(os.getcwd()) / 'udr.log')
         self.params['specify ip'] = None
         self.parse_conf(configfile, self.params)
 
         #check that rsyncd.conf exists, otherwise rsync fails silently
-        self.rsync_params = {}
+        self.rsync_params: dict[str, str] = {}
         self.parse_conf(self.params['rsyncd conf'], self.rsync_params)
         super(UDRServer, self).__init__(pidfile=self.params['pid file'], stdout=self.params['log file'], stderr=self.params['log file'])
 
     def run(self):
         self.set_uid_gid()
-        self.config_logger()    
-        SocketServer.TCPServer.allow_reuse_address = True
-        server = SocketServer.TCPServer((self.params['address'], int(self.params['server port'])), UDRHandler) 
+        self.config_logger()
+        socketserver.TCPServer.allow_reuse_address = True
+        server = socketserver.TCPServer((self.params['address'], int(self.params['server port'])), UDRHandler)
         server.params = self.params
         server.rsync_params = self.rsync_params
-        logging.debug('params: %s' % str(self.params))
-        logging.info('UDR server started on %s %s' % (self.params['address'], self.params['server port']))
+        logging.debug('params: %s', str(self.params))
+        logging.info('UDR server started on %s %s', self.params['address'], self.params['server port'])
         server.serve_forever()
 
     def set_uid_gid(self):
@@ -142,16 +172,21 @@ class UDRServer(Daemon, object):
             if os.geteuid() == 0:
                 os.setuid(pwd.getpwnam('nobody').pw_uid)
 
-    def read_lines(self, filename):
-        linefile = open(filename)
-        lines = []
-        for line in linefile:
-            line = line.strip()
-            lines.append(line)
-            if not line.endswith("\\"):
-                yield "".join(lines)
-                lines = []
-        if len(lines) > 0:
+    def read_lines(self, filename: str) -> Iterable[str]:
+        path = Path(filename)
+        if not path.exists():
+            logging.debug('Skipping missing configuration file: %s', filename)
+            return
+
+        lines: list[str] = []
+        with path.open('r', encoding='utf-8') as linefile:
+            for line in linefile:
+                line = line.strip()
+                lines.append(line)
+                if not line.endswith("\\"):
+                    yield "".join(lines)
+                    lines = []
+        if lines:
             yield "".join(lines)
 
     def parse_conf(self, filename, param_dict):
@@ -181,7 +216,7 @@ class UDRServer(Daemon, object):
         formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
         handler.setFormatter(formatter)
         logger.addHandler(handler)
-    
+
         if 'log level' in self.params:
             logger.setLevel(getattr(logging, self.params['log level'].upper()))
         else:
@@ -191,45 +226,37 @@ def main():
     """
     Parses server options and start|stop|restart|foreground UDRServer daemon
     """
-    parser = optparse.OptionParser()
-    parser.add_option('-c', '--config', dest='config', help='UDR server config file')
-    parser.add_option('-v', '--verbose', action='store_true', dest='verbose', default=False)
-    parser.add_option('-s', '--silent', action='store_true', dest='silent', default=False)
-    (options, args) = parser.parse_args()
+    parser = argparse.ArgumentParser(description='UDR server process manager')
+    parser.add_argument('-c', '--config', dest='config', help='UDR server config file')
+    parser.add_argument('-v', '--verbose', action='store_true', dest='verbose', default=False)
+    parser.add_argument('-s', '--silent', action='store_true', dest='silent', default=False)
+    parser.add_argument('action', choices=['start', 'stop', 'restart', 'foreground'])
 
-    if options.config:
-        configfile = options.config
-    else:
-        configfile = '/etc/udrd.conf'
+    args = parser.parse_args()
 
-    daemon = UDRServer(configfile, options.verbose)
+    configfile = args.config or '/etc/udrd.conf'
 
-    if len(sys.argv) > 1:
-        if 'start' == sys.argv[-1]:
-            if not options.silent:
-                sys.stderr.write('Starting UDR server\n')
-            daemon.start()
-        elif 'stop' == sys.argv[-1]:
-            if not options.silent:
-                sys.stderr.write('Stopping UDR server\n')
-            daemon.stop()
-        elif 'restart' == sys.argv[-1]:
-            if not options.silent:
-                sys.stderr.write('Stopping UDR server\n')
-            daemon.stop()
-            time.sleep(2)
-            if not options.silent:
-                sys.stderr.write('Starting UDR server\n')
-            daemon.start()
-        elif 'foreground' == sys.argv[-1]:
-            daemon.run()
-        else:
-            print "usage: %s [options] start|stop|restart|foreground" % sys.argv[0]
-            sys.exit(2)
-        sys.exit(0)
-    else:
-        print "usage: %s [options] start|stop|restart|foreground" % sys.argv[0]
-        sys.exit(2)
+    daemon = UDRServer(configfile, args.verbose)
+
+    if args.action == 'start':
+        if not args.silent:
+            sys.stderr.write('Starting UDR server\n')
+        daemon.start()
+    elif args.action == 'stop':
+        if not args.silent:
+            sys.stderr.write('Stopping UDR server\n')
+        daemon.stop()
+    elif args.action == 'restart':
+        if not args.silent:
+            sys.stderr.write('Stopping UDR server\n')
+        daemon.stop()
+        time.sleep(2)
+        if not args.silent:
+            sys.stderr.write('Starting UDR server\n')
+        daemon.start()
+    elif args.action == 'foreground':
+        daemon.run()
+
 
 if __name__ == '__main__':
     main()
