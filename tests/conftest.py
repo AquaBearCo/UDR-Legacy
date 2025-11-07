@@ -50,21 +50,23 @@ def default_args(udr_path, ssh_port):
         'rsync',
     ]
 
-@pytest.yield_fixture
+@pytest.fixture
 def udr(udr_path, src_dir):
     """Returns a Popen partial function to run UDR"""
 
     # Return a partial to start the process (savinging it in closure
     # bound _process to clean up later)
     processes = []
-    def start_udr(args=[]):
+    def start_udr(args=None):
         """Starts udr with arguments :param:`args`"""
-        print(f'Running with args {args}')
-        process = Popen([udr_path]+list(args), stdout=PIPE, stderr=PIPE)
+        cmd_args = list(args or [])
+        print(f'Running with args {cmd_args}')
+        process = Popen([udr_path] + cmd_args, stdout=PIPE, stderr=PIPE)
         processes.append(process)
         return processes[-1]
 
-    yield start_udr
-
-    for process in processes:
-        process.wait()
+    try:
+        yield start_udr
+    finally:
+        for process in processes:
+            process.wait()
